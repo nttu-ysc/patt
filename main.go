@@ -3,8 +3,11 @@ package main
 import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/sys/unix"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 )
 
 func main() {
@@ -28,7 +31,19 @@ func main() {
 	}
 	defer session.Close()
 
-	// 連接標準輸入、輸出和錯誤
+	// 視窗大小改變時發送 SIGWINCH 信號
+	sigwinch := make(chan os.Signal, 1)
+	signal.Notify(sigwinch, syscall.SIGWINCH)
+	go func() {
+		for {
+			<-sigwinch
+			width, height, err := terminalSize()
+			if err == nil {
+				session.WindowChange(height, width)
+			}
+		}
+	}()
+
 	session.Stdout = os.Stdout
 	session.Stderr = os.Stderr
 	session.Stdin = os.Stdin
@@ -68,4 +83,12 @@ func main() {
 
 	// 等待結束
 	session.Wait()
+}
+
+func terminalSize() (int, int, error) {
+	ws, err := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ)
+	if err != nil {
+		return 0, 0, err
+	}
+	return int(ws.Col), int(ws.Row), nil
 }
