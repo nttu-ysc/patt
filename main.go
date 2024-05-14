@@ -1,94 +1,77 @@
 package main
 
 import (
-	"golang.org/x/crypto/ssh"
+	"fmt"
+	"github.com/joho/godotenv"
+	"github.com/nttu-ysc/patt/utils/file"
+	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh/terminal"
-	"golang.org/x/sys/unix"
-	"log"
 	"os"
-	"os/signal"
 	"syscall"
 )
 
-func main() {
-	// SSH 連接設置
-	config := &ssh.ClientConfig{
-		User:            "bbsu",
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+func init() {
+	homeDir, _ := os.UserHomeDir()
+	if err := godotenv.Load(homeDir + "/.patt"); err != nil {
+		return
 	}
-
-	// 建立 SSH 連接
-	conn, err := ssh.Dial("tcp", "ptt.cc:22", config)
-	if err != nil {
-		log.Fatalf("unable to connect: %s", err)
-	}
-	defer conn.Close()
-
-	// 創建一個新的會話
-	session, err := conn.NewSession()
-	if err != nil {
-		log.Fatalf("unable to create session: %s", err)
-	}
-	defer session.Close()
-
-	// 視窗大小改變時發送 SIGWINCH 信號
-	sigwinch := make(chan os.Signal, 1)
-	signal.Notify(sigwinch, syscall.SIGWINCH)
-	go func() {
-		for {
-			<-sigwinch
-			width, height, err := terminalSize()
-			if err == nil {
-				session.WindowChange(height, width)
-			}
-		}
-	}()
-
-	session.Stdout = os.Stdout
-	session.Stderr = os.Stderr
-	session.Stdin = os.Stdin
-
-	// 獲取本地終端的屬性
-	terminalModes := ssh.TerminalModes{
-		ssh.ECHO:          0,     // 禁用本地輸入的回顯
-		ssh.TTY_OP_ISPEED: 14400, // 輸入速度
-		ssh.TTY_OP_OSPEED: 14400, // 輸出速度
-	}
-
-	// 設置終端模式
-	fileDescriptor := int(os.Stdin.Fd())
-	if terminal.IsTerminal(fileDescriptor) {
-		originalState, err := terminal.MakeRaw(fileDescriptor)
-		if err != nil {
-			panic(err)
-		}
-		defer terminal.Restore(fileDescriptor, originalState)
-
-		termWidth, termHeight, err := terminal.GetSize(fileDescriptor)
-		if err != nil {
-			panic(err)
-		}
-
-		err = session.RequestPty("xterm-256color", termHeight, termWidth, terminalModes)
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	// 啟動一個 shell
-	err = session.Shell()
-	if err != nil {
-		log.Fatalf("failed to start shell: %s", err)
-	}
-
-	// 等待結束
-	session.Wait()
 }
 
-func terminalSize() (int, int, error) {
-	ws, err := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ)
-	if err != nil {
-		return 0, 0, err
+func main() {
+	rootCmd := &cobra.Command{
+		Use: "patt",
+		Run: func(cmd *cobra.Command, args []string) {
+			p := NewDefaultPtt()
+			p.connect()
+		},
 	}
-	return int(ws.Col), int(ws.Row), nil
+	rootCmd.AddCommand(&cobra.Command{
+		Use:   "config",
+		Short: "Start an interactive config session",
+		Run: func(cmd *cobra.Command, args []string) {
+			homeDir, _ := os.UserHomeDir()
+			var account, password string
+			var reloadSecond float64
+			fmt.Print("請輸入你的帳號? ")
+			fmt.Scanln(&account)
+			fmt.Print("請輸入你的密碼? ")
+			bytePassword, _ := terminal.ReadPassword(syscall.Stdin)
+			password = string(bytePassword)
+			fmt.Println()
+			for {
+				fmt.Print("請輸入自動更新推文間隔秒數？ (最少為 1 秒) ")
+				fmt.Scanln(&reloadSecond)
+				if reloadSecond >= 1 {
+					break
+				}
+			}
+			if err := file.Write(
+				homeDir+"/.patt",
+				[]byte(
+					fmt.Sprintf(
+						"account=%s\npassword=%s\nptt_reload_sec=%f",
+						account,
+						password,
+						reloadSecond,
+					),
+				),
+			); err != nil {
+				fmt.Printf("\n設定失敗: %s\n", err)
+			} else {
+				fmt.Printf("\n設定完成...\n")
+			}
+		},
+	})
+	rootCmd.AddCommand(&cobra.Command{
+		Use:   "help",
+		Short: "Help",
+		Run: func(cmd *cobra.Command, args []string) {
+			cmd.Help()
+		},
+	})
+
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 }
