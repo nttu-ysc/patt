@@ -10,6 +10,8 @@ import (
 	"syscall"
 )
 
+const version = "1.0.1"
+
 func init() {
 	homeDir, _ := os.UserHomeDir()
 	if err := godotenv.Load(homeDir + "/.patt"); err != nil {
@@ -62,13 +64,8 @@ func main() {
 			}
 		},
 	})
-	rootCmd.AddCommand(&cobra.Command{
-		Use:   "help",
-		Short: "Help",
-		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Help()
-		},
-	})
+
+	rootCmd.Version = version
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
