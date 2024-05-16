@@ -22,7 +22,7 @@ func main() {
 		Use: "patt",
 		Run: func(cmd *cobra.Command, args []string) {
 			p := NewDefaultPtt()
-			p.connect()
+			p.Connect()
 		},
 	}
 	rootCmd.AddCommand(&cobra.Command{

@@ -15,26 +15,26 @@ import (
 	"time"
 )
 
-type ptt struct {
+type Ptt struct {
 	sessionStdin         io.WriteCloser
 	sessionCh            chan bool
 	toggleReloadComments chan bool
 	reloadSecond         float64
 }
 
-func NewDefaultPtt() *ptt {
+func NewDefaultPtt() *Ptt {
 	sec, err := strconv.ParseFloat(os.Getenv("ptt_reload_sec"), 32)
 	if err != nil {
 		sec = 1
 	}
-	return &ptt{
+	return &Ptt{
 		sessionCh:            make(chan bool, 1),
 		toggleReloadComments: make(chan bool, 1),
 		reloadSecond:         sec,
 	}
 }
 
-func (ptt *ptt) connect() {
+func (ptt *Ptt) Connect() {
 	// SSH 連接設置
 	config := &ssh.ClientConfig{
 		User:            "bbsu",
@@ -44,7 +44,7 @@ func (ptt *ptt) connect() {
 	// 建立 SSH 連接
 	conn, err := ssh.Dial("tcp", "ptt.cc:22", config)
 	if err != nil {
-		log.Fatalf("unable to connect: %s", err)
+		log.Fatalf("unable to Connect: %s", err)
 	}
 	defer conn.Close()
 
@@ -106,6 +106,7 @@ func (ptt *ptt) connect() {
 		log.Fatalf("failed to start shell: %s", err)
 	}
 
+	// 自動登入
 	ptt.autoLogin()
 
 	go func() {
@@ -113,31 +114,13 @@ func (ptt *ptt) connect() {
 		ptt.sessionCh <- true
 	}()
 
-	ptt.toggleReloadComments = make(chan bool, 1)
-
-	go func() {
-		for {
-		RELOAD:
-			active := <-ptt.toggleReloadComments
-			if !active {
-				continue
-			}
-			for {
-				select {
-				case <-ptt.toggleReloadComments:
-					goto RELOAD
-				default:
-					ptt.sessionStdin.Write([]byte("ql$"))
-					time.Sleep(time.Duration(ptt.reloadSecond) * time.Second)
-				}
-			}
-		}
-	}()
+	// 背景監聽是否更新自動推文
+	go ptt.reloadComments()
 
 	ptt.detectKeyboard()
 }
 
-func (ptt *ptt) detectKeyboard() {
+func (ptt *Ptt) detectKeyboard() {
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		fmt.Println("Error setting terminal mode:", err)
@@ -174,7 +157,7 @@ func (ptt *ptt) detectKeyboard() {
 	}
 }
 
-func (ptt *ptt) autoLogin() {
+func (ptt *Ptt) autoLogin() {
 	account := os.Getenv("account")
 	password := os.Getenv("password")
 	if account == "" || password == "" {
@@ -182,4 +165,23 @@ func (ptt *ptt) autoLogin() {
 	}
 	ptt.sessionStdin.Write([]byte(account + "\r"))
 	ptt.sessionStdin.Write([]byte(password + "\r"))
+}
+
+func (ptt *Ptt) reloadComments() {
+	for {
+	RELOAD:
+		active := <-ptt.toggleReloadComments
+		if !active {
+			continue
+		}
+		for {
+			select {
+			case <-ptt.toggleReloadComments:
+				goto RELOAD
+			default:
+				ptt.sessionStdin.Write([]byte("ql$"))
+				time.Sleep(time.Duration(ptt.reloadSecond) * time.Second)
+			}
+		}
+	}
 }
